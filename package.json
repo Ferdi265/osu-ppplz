@@ -1,10 +1,14 @@
 {
-  "name": "osu!ppplz",
-  "version": "1.0.0",
-  "description": "An application to list pp and ranking information for every play",
+  "name": "osu-ppplz",
+  "version": "1.0.1",
+  "description": "A module to list pp and ranking information for every play",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ferdi265/osu-ppplz.git"
   },
   "keywords": [
     "osu",
@@ -14,10 +18,12 @@
   ],
   "author": "Ferdi265 <theferdi265@gmail.com>",
   "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Ferdi265/osu-ppplz/issues"
+  },
+  "homepage": "https://github.com/Ferdi265/osu-ppplz",
   "dependencies": {
-    "osu-api": "*",
-    "async": "*",
-    "colorful": "*",
-    "optimist": "*"
+    "osu-api": ">=0.0.2",
+    "async": ">=0.9"
   }
 }
