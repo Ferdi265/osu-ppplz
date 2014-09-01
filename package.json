@@ -1,0 +1,23 @@
+{
+  "name": "osu!ppplz",
+  "version": "1.0.0",
+  "description": "An application to list pp and ranking information for every play",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "osu",
+    "pp",
+    "module",
+    "api"
+  ],
+  "author": "Ferdi265 <theferdi265@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "osu-api": "*",
+    "async": "*",
+    "colorful": "*",
+    "optimist": "*"
+  }
+}
