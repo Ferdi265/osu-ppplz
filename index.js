@@ -1,6 +1,10 @@
 var //Requires
 	osuapi = require('osu-api'),
-	async = require('async');
+	fs = require('fs'),
+	async = require('async'),
+	debuglog = fs.createWriteStream('debug.txt', {
+		flags: 'a'
+	});
 
 module.exports = function (key) {
 	var inst = {},
@@ -8,8 +12,8 @@ module.exports = function (key) {
 		watching = {},
 		//Private Functions
 		accuracy = function (score) {
-			var hitscore = parseInt(score.count300, 10) * 300 + parseInt(score.count100, 10) * 100 + parseInt(score.count50, 10) * 50,
-				hitcount = parseInt(score.count300, 10) + parseInt(score.count100, 10) + parseInt(score.count50, 10) + parseInt(score.countmiss, 10);
+			var hitscore = parseFloat(score.count300, 10) * 300 + parseFloat(score.count100, 10) * 100 + parseFloat(score.count50, 10) * 50,
+				hitcount = parseFloat(score.count300, 10) + parseFloat(score.count100, 10) + parseFloat(score.count50, 10) + parseFloat(score.countmiss, 10);
 			return hitscore / (hitcount * 300) * 100;
 		},
 		scoresEqual = function (score1, score2) {
@@ -23,10 +27,59 @@ module.exports = function (key) {
 				score1.perfect === score2.perfect &&
 				score1.enabled_mods === score2.enabled_mods;
 		},
+		indexInBest = function (score, best) {
+			for (var i = 0, c = best.length; i < c; ++i) {
+				if (scoresEqual(score, best[i])) {
+					return i;
+				}
+			}
+			return -1;
+		},
+		decorate = function (current, score, best, user, userData) {
+			var decorated = {},
+				scoreAccuracy = accuracy(current),
+				relativePP,
+				relativeRank,
+				index;
+			if (userData) {
+				relativePP = parseFloat(user.pp_raw, 10) - userData.pp;
+				relativeRank = parseFloat(user.pp_rank, 10) - userData.rank;
+				userData.pp = parseFloat(user.pp_raw, 10);
+				userData.rank = parseFloat(user.pp_rank, 10);
+				user.relative_pp = relativePP;
+				user.relative_rank = relativeRank;
+				user.relative = true;
+			} else {
+				user.relative = false;
+			}
+			user.pp = parseFloat(user.pp_raw, 10);
+			user.rank = parseFloat(user.pp_rank, 10);
+			decorated.user = user;
+			if (score && scoresEqual(current, score)) {
+				index = indexInBest(score, best);
+				score.pp_raw = parseFloat(score.pp, 10);
+				score.accuracy = scoreAccuracy;
+				score.beatmap_id = current.beatmap_id;
+				score.pb = true;
+				if (index !== -1) {
+					score.pp_weighted = score.pp_raw * Math.pow(0.95, index);
+				} else {
+					debuglog.write('strange score:');
+					debuglog.write(JSON.stringify(best, null, '\t'));
+					debuglog.write(JSON.stringify(score, null, '\t'));
+				}
+				decorated.score = score;
+			} else {
+				current.accuracy = scoreAccuracy;
+				current.pb = false;
+				decorated.score = current;
+			}
+			return decorated;
+		},
 		decorateScore = function (current, score) {
 			var scoreAccuracy = accuracy(current);
 			if (score && scoresEqual(current, score)) {
-				score.pp = parseInt(score.pp, 10);
+				score.pp = parseFloat(score.pp, 10);
 				score.accuracy = scoreAccuracy;
 				score.beatmap_id = current.beatmap_id;
 				score.pb = true;
@@ -38,10 +91,10 @@ module.exports = function (key) {
 			}
 		},
 		decorateUser = function (userData, user) {
-			var relativePP = parseInt(user.pp_raw, 10) - userData.pp,
-				relativeRank = parseInt(user.pp_rank, 10) - userData.rank;
-			userData.pp = parseInt(user.pp_raw, 10);
-			userData.rank = parseInt(user.pp_rank, 10);
+			var relativePP = parseFloat(user.pp_raw, 10) - userData.pp,
+				relativeRank = parseFloat(user.pp_rank, 10) - userData.rank;
+			userData.pp = parseFloat(user.pp_raw, 10);
+			userData.rank = parseFloat(user.pp_rank, 10);
 			user.pp = userData.pp;
 			user.rank = userData.rank;
 			user.relative_pp = relativePP;
@@ -78,9 +131,9 @@ module.exports = function (key) {
 						inst.unwatch(userData.user);
 						userData.cb(err);
 					} else {
-						userData.id = parseInt(result.user.user_id, 10);
-						userData.pp = parseInt(result.user.pp_raw, 10);
-						userData.rank = parseInt(result.user.pp_rank, 10);
+						userData.id = parseFloat(result.user.user_id, 10);
+						userData.pp = parseFloat(result.user.pp_raw, 10);
+						userData.rank = parseFloat(result.user.pp_rank, 10);
 						userData.recent = result.recentPlays[0];
 						throttle(watch.bind(undefined, userData));
 					}
@@ -98,18 +151,19 @@ module.exports = function (key) {
 							osu.setMode(userData.mode);
 							async.parallel({
 								score: getScore.bind(undefined, current.beatmap_id, userData.id, userData.mode),
-								user: osu.getUser.bind(osu, userData.id)
+								user: osu.getUser.bind(osu, userData.id),
+								best: osu.getUserBestRaw.bind(osu, {
+									m: userData.mode,
+									u: userData.id,
+									type: 'id',
+									limit: 50
+								})
 							}, function (err, result) {
 								if (err) {
 									inst.unwatch(userData.user);
 									userData.cb(err);
 								} else {
-									var score = decorateScore(current, result.score),
-										user = decorateUser(userData, result.user);
-									userData.cb(null, {
-										score: score,
-										user: user
-									});
+									userData.cb(null, decorate(current, result.score, result.best, result.user, userData));
 									throttle(watch.bind(undefined, userData));
 								}
 							});
@@ -171,16 +225,26 @@ module.exports = function (key) {
 		osu.setMode(mode);
 		async.parallel({
 			recent: osu.getUserRecent.bind(osu, user),
-			user: osu.getUser.bind(osu, user)
+			user: osu.getUser.bind(osu, user),
 		}, function (err, result) {
 			if (err || !result.recent[0]) {
 				cb(err);
 			} else {
-				getScore(result.recent[0].beatmap_id, result.user.user_id, mode, function (err, score) {
+				var current = result.recent[0],
+					user = result.user;
+				async.parallel({
+					score: getScore.bind(undefined, current.beatmap_id, user.user_id, mode),
+					best: osu.getUserBestRaw.bind(osu, {
+						m: mode,
+						u: user.user_id,
+						type: 'id',
+						limit: 50
+					})
+				}, function (err, result) {
 					if (err) {
 						cb(err);
 					} else {
-						cb(null, decorateScore(result.recent[0], score));
+						cb(null, decorate(current, result.score, result.best, user));
 					}
 				});
 			}
