@@ -67,7 +67,7 @@ module.exports = function (key) {
 		},
 		watch = function (userData) {
 			if (userData.stop) {
-				userData.cb(new Error('Stopped watching.'));
+				userData.cb('Stopped watching.');
 			} else if (!userData.id) {
 				osu.setMode(userData.mode);
 				async.parallel({
@@ -92,7 +92,7 @@ module.exports = function (key) {
 						inst.unwatch(userData.user);
 						userData.cb(err);
 					} else {
-						if (userData.recent && recentPlays[0] && !scoresEqual(userData.recent, recentPlays[0])) {
+						if ((!userData.recent && recentPlays[0]) ||  (userData.recent && recentPlays[0] && !scoresEqual(userData.recent, recentPlays[0]))) {
 							var current = recentPlays[0];
 							userData.recent = current;
 							osu.setMode(userData.mode);

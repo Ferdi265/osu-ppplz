@@ -1,6 +1,6 @@
 {
   "name": "osu-ppplz",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "A module to list pp and ranking information for every play",
   "main": "index.js",
   "scripts": {
