@@ -3,7 +3,7 @@ var //Requires
 	async = require('async');
 
 module.exports = function (key) {
-	var inst = new process.EventEmitter(),
+	var inst = {},
 		osu = new osuapi.Api(key),
 		watching = {},
 		//Private Functions
@@ -48,8 +48,28 @@ module.exports = function (key) {
 			user.relative_rank = relativeRank;
 			return user;
 		},
+		timeout = null,
+		buffer = [],
+		process = function () {
+			var fn = buffer.splice(0, 1)[0];
+			if (fn) {
+				fn();
+				timeout = setTimeout(process, 1000);
+			} else {
+				timeout = null;
+			}
+		},
+		throttle = function (fn) {
+			buffer.push(fn);
+			if (timeout === null) {
+				timeout = setTimeout(process, 0);
+			}
+		},
 		watch = function (userData) {
-			if (!userData.id) {
+			if (userData.stop) {
+				userData.cb(new Error('Stopped watching.'));
+			} else if (!userData.id) {
+				osu.setMode(userData.mode);
 				async.parallel({
 					recentPlays: osu.getUserRecent.bind(osu, userData.user),
 					user: osu.getUser.bind(osu, userData.user)
@@ -62,10 +82,11 @@ module.exports = function (key) {
 						userData.pp = parseInt(result.user.pp_raw, 10);
 						userData.rank = parseInt(result.user.pp_rank, 10);
 						userData.recent = result.recentPlays[0];
-						setTimeout(watch.bind(undefined, userData), 2000);
+						throttle(watch.bind(undefined, userData));
 					}
 				});
 			} else {
+				osu.setMode(userData.mode);
 				osu.getUserRecent(userData.id, function (err, recentPlays) {
 					if (err) {
 						inst.unwatch(userData.user);
@@ -74,8 +95,9 @@ module.exports = function (key) {
 						if (userData.recent && recentPlays[0] && !scoresEqual(userData.recent, recentPlays[0])) {
 							var current = recentPlays[0];
 							userData.recent = current;
+							osu.setMode(userData.mode);
 							async.parallel({
-								score: getScore.bind(undefined, current.beatmap_id, userData.id),
+								score: getScore.bind(undefined, current.beatmap_id, userData.id, userData.mode),
 								user: osu.getUser.bind(osu, userData.id)
 							}, function (err, result) {
 								if (err) {
@@ -86,19 +108,24 @@ module.exports = function (key) {
 										user = decorateUser(userData, result.user);
 									userData.cb(null, {
 										score: score,
-										user: user,
+										user: user
 									});
-									setTimeout(watch.bind(undefined, userData), 2000);
+									throttle(watch.bind(undefined, userData));
 								}
 							});
 						} else {
-							setTimeout(watch.bind(undefined, userData), 2000);
+							throttle(watch.bind(undefined, userData));
 						}
 					}
 				});
 			}
 		},
-		getScore = function (beatmapId, userId, cb) {
+		getScore = function (beatmapId, userId, mode, cb) {
+			if (!cb) {
+				cb = mode;
+				mode = osuapi.Modes.osu;
+			}
+			osu.setMode(mode);
 			osu.getUserScore(beatmapId, userId, function (err, score) {
 				if (err) {
 					cb(err);
@@ -112,13 +139,19 @@ module.exports = function (key) {
 			});
 		};
 	inst.osu = osu;
-	inst.watch = function (user, cb) {
+	inst.Modes = osuapi.Modes;
+	inst.watch = function (user, mode, cb) {
 		if (!watching[user]) {
+			if (!cb) {
+				cb = mode;
+				mode = osuapi.Modes.osu;
+			}
 			watching[user] = {
 				cb: cb,
-				user: user
+				user: user,
+				mode: mode
 			};
-			watching[user].timeout = setTimeout(watch.bind(undefined, watching[user]), 0);
+			throttle(watch.bind(undefined, watching[user]));
 		}
 	};
 	inst.watching = function (user) {
@@ -126,11 +159,16 @@ module.exports = function (key) {
 	};
 	inst.unwatch = function (user) {
 		if (watching[user]) {
-			clearTimeout(watching[user].timeout);
+			watching[user].stop = true;
 			delete watching[user];
 		}
 	};
-	inst.lastScore = function (user, cb) {
+	inst.lastScore = function (user, mode, cb) {
+		if (!cb) {
+			cb = mode;
+			mode = osuapi.Modes.osu;
+		}
+		osu.setMode(mode);
 		async.parallel({
 			recent: osu.getUserRecent.bind(osu, user),
 			user: osu.getUser.bind(osu, user)
@@ -138,12 +176,11 @@ module.exports = function (key) {
 			if (err || !result.recent[0]) {
 				cb(err);
 			} else {
-				getScore(result.recent[0].beatmap_id, result.user.user_id, function (err, score) {
+				getScore(result.recent[0].beatmap_id, result.user.user_id, mode, function (err, score) {
 					if (err) {
 						cb(err);
 					} else {
 						cb(null, decorateScore(result.recent[0], score));
-
 					}
 				});
 			}
