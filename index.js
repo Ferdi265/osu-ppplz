@@ -1,10 +1,6 @@
 var //Requires
 	osuapi = require('osu-api'),
-	fs = require('fs'),
-	async = require('async'),
-	debuglog = fs.createWriteStream('debug.txt', {
-		flags: 'a'
-	});
+	async = require('async');
 
 module.exports = function (key) {
 	var inst = {},
@@ -63,10 +59,6 @@ module.exports = function (key) {
 				score.pb = true;
 				if (index !== -1) {
 					score.pp_weighted = score.pp_raw * Math.pow(0.95, index);
-				} else {
-					debuglog.write('strange score:');
-					debuglog.write(JSON.stringify(best, null, '\t'));
-					debuglog.write(JSON.stringify(score, null, '\t'));
 				}
 				decorated.score = score;
 			} else {
