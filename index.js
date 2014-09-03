@@ -5,7 +5,7 @@ var //Requires
 module.exports = function (key) {
 	var inst = {},
 		osu = new osuapi.Api(key),
-		watching = {},
+		meta = {},
 		//Private Functions
 		accuracy = function (score) {
 			var hitscore = parseFloat(score.count300, 10) * 300 + parseFloat(score.count100, 10) * 100 + parseFloat(score.count50, 10) * 50,
@@ -37,19 +37,19 @@ module.exports = function (key) {
 				relativePP,
 				relativeRank,
 				index;
-			if (userData) {
+			if (userData.pp && userData.rank) {
 				relativePP = parseFloat(user.pp_raw, 10) - userData.pp;
-				relativeRank = parseFloat(user.pp_rank, 10) - userData.rank;
-				userData.pp = parseFloat(user.pp_raw, 10);
-				userData.rank = parseFloat(user.pp_rank, 10);
+				relativeRank = parseInt(user.pp_rank, 10) - userData.rank;
 				user.relative_pp = relativePP;
 				user.relative_rank = relativeRank;
 				user.relative = true;
 			} else {
 				user.relative = false;
 			}
+			userData.pp = parseFloat(user.pp_raw, 10);
+			userData.rank = parseInt(user.pp_rank, 10);
 			user.pp = parseFloat(user.pp_raw, 10);
-			user.rank = parseFloat(user.pp_rank, 10);
+			user.rank = parseInt(user.pp_rank, 10);
 			decorated.user = user;
 			if (score && scoresEqual(current, score)) {
 				index = indexInBest(score, best);
@@ -67,31 +67,6 @@ module.exports = function (key) {
 				decorated.score = current;
 			}
 			return decorated;
-		},
-		decorateScore = function (current, score) {
-			var scoreAccuracy = accuracy(current);
-			if (score && scoresEqual(current, score)) {
-				score.pp = parseFloat(score.pp, 10);
-				score.accuracy = scoreAccuracy;
-				score.beatmap_id = current.beatmap_id;
-				score.pb = true;
-				return score;
-			} else {
-				current.accuracy = scoreAccuracy;
-				current.pb = false;
-				return current;
-			}
-		},
-		decorateUser = function (userData, user) {
-			var relativePP = parseFloat(user.pp_raw, 10) - userData.pp,
-				relativeRank = parseFloat(user.pp_rank, 10) - userData.rank;
-			userData.pp = parseFloat(user.pp_raw, 10);
-			userData.rank = parseFloat(user.pp_rank, 10);
-			user.pp = userData.pp;
-			user.rank = userData.rank;
-			user.relative_pp = relativePP;
-			user.relative_rank = relativeRank;
-			return user;
 		},
 		timeout = null,
 		buffer = [],
@@ -111,41 +86,46 @@ module.exports = function (key) {
 			}
 		},
 		watch = function (userData) {
-			if (userData.stop) {
-				userData.cb('Stopped watching.');
-			} else if (!userData.id) {
-				osu.setMode(userData.mode);
+			if (userData.watching.stop) {
+				userData.watching.cb('Stopped watching.');
+				delete userData.watching;
+			} else if (!userData.watching.start) {
+				osu.setMode(userData.watching.mode);
 				async.parallel({
 					recentPlays: osu.getUserRecent.bind(osu, userData.user),
 					user: osu.getUser.bind(osu, userData.user)
 				}, function (err, result) {
 					if (err) {
 						inst.unwatch(userData.user);
-						userData.cb(err);
+						userData.watching.cb(err);
+						throttle(watch.bind(undefined, userData));
 					} else {
-						userData.id = parseFloat(result.user.user_id, 10);
+						userData.id = parseInt(result.user.user_id, 10);
 						userData.pp = parseFloat(result.user.pp_raw, 10);
-						userData.rank = parseFloat(result.user.pp_rank, 10);
-						userData.recent = result.recentPlays[0];
+						userData.rank = parseInt(result.user.pp_rank, 10);
+						userData.watching.recent = result.recentPlays[0];
+						userData.watching.start = true;
 						throttle(watch.bind(undefined, userData));
 					}
 				});
 			} else {
-				osu.setMode(userData.mode);
+				osu.setMode(userData.watching.mode);
 				osu.getUserRecent(userData.id, function (err, recentPlays) {
 					if (err) {
 						inst.unwatch(userData.user);
-						userData.cb(err);
+						userData.watching.cb(err);
+						throttle(watch.bind(undefined, userData));
 					} else {
-						if ((!userData.recent && recentPlays[0]) ||  (userData.recent && recentPlays[0] && !scoresEqual(userData.recent, recentPlays[0]))) {
+						if ((!userData.watching.recent && recentPlays[0]) ||  (userData.watching.recent && recentPlays[0] && !scoresEqual(userData.watching.recent, recentPlays[0]))) {
 							var current = recentPlays[0];
-							userData.recent = current;
-							osu.setMode(userData.mode);
+							userData.watching.recent = current;
+							userData.lastAction = Date.now();
+							osu.setMode(userData.watching.mode);
 							async.parallel({
-								score: getScore.bind(undefined, current.beatmap_id, userData.id, userData.mode),
+								score: getScore.bind(undefined, current.beatmap_id, userData.id, userData.watching.mode),
 								user: osu.getUser.bind(osu, userData.id),
 								best: osu.getUserBestRaw.bind(osu, {
-									m: userData.mode,
+									m: userData.watching.mode,
 									u: userData.id,
 									type: 'id',
 									limit: 50
@@ -153,14 +133,20 @@ module.exports = function (key) {
 							}, function (err, result) {
 								if (err) {
 									inst.unwatch(userData.user);
-									userData.cb(err);
+									userData.watching.cb(err);
+									throttle(watch.bind(undefined, userData));
 								} else {
-									userData.cb(null, decorate(current, result.score, result.best, result.user, userData));
+									userData.watching.cb(null, decorate(current, result.score, result.best, result.user, userData));
 									throttle(watch.bind(undefined, userData));
 								}
 							});
 						} else {
-							throttle(watch.bind(undefined, userData));
+							if (Date.now() - userData.lastAction > 1000 * 60 * 15) {
+								inst.unwatch(userData.user);
+								throttle(watch.bind(undefined, userData));
+							} else {
+								throttle(watch.bind(undefined, userData));
+							}
 						}
 					}
 				});
@@ -186,30 +172,61 @@ module.exports = function (key) {
 		};
 	inst.osu = osu;
 	inst.Modes = osuapi.Modes;
+	inst.Mods = {
+		Hidden: 8,
+		HardRock: 16,
+		SuddenDeath: 32,
+		Perfect: 16384,
+		DoubleTime: 64,
+		NightCore: 512,
+		FlashLight: 1024,
+		FadeIn: 1048576,
+		Easy: 2,
+		NoFail: 1,
+		HalfTime: 256,
+		SpunOut: 4096,
+		Key4: 32768,
+		Key5: 65536,
+		Key6: 131072,
+		Key7: 262144,
+		Key8: 524288,
+	};
 	inst.watch = function (user, mode, cb) {
-		if (!watching[user]) {
+		if (!meta[user]) {
+			meta[user] = {
+				user: user
+			};
+		}
+		meta[user].lastAction = Date.now();
+		if (!meta[user].watching) {
 			if (!cb) {
 				cb = mode;
 				mode = osuapi.Modes.osu;
 			}
-			watching[user] = {
+			meta[user].watching = {
 				cb: cb,
-				user: user,
 				mode: mode
 			};
-			throttle(watch.bind(undefined, watching[user]));
+			throttle(watch.bind(undefined, meta[user]));
 		}
 	};
 	inst.watching = function (user) {
-		return Boolean(watching[user]);
+		return Boolean(meta[user] ? meta[user].watching : false);
 	};
 	inst.unwatch = function (user) {
-		if (watching[user]) {
-			watching[user].stop = true;
-			delete watching[user];
+		if (meta[user] && meta[user].watching) {
+			meta[user].watching.stop = true;
 		}
 	};
 	inst.lastScore = function (user, mode, cb) {
+		var userData;
+		if (!meta[user]) {
+			meta[user] = {
+				user: user
+			};
+		}
+		userData = meta[user];
+		userData.lastAction = Date.now();
 		if (!cb) {
 			cb = mode;
 			mode = osuapi.Modes.osu;
@@ -224,11 +241,12 @@ module.exports = function (key) {
 			} else {
 				var current = result.recent[0],
 					user = result.user;
+				userData.id = parseInt(user.user_id, 10);
 				async.parallel({
-					score: getScore.bind(undefined, current.beatmap_id, user.user_id, mode),
+					score: getScore.bind(undefined, current.beatmap_id, userData.id, mode),
 					best: osu.getUserBestRaw.bind(osu, {
 						m: mode,
-						u: user.user_id,
+						u: user.id,
 						type: 'id',
 						limit: 50
 					})
@@ -236,7 +254,7 @@ module.exports = function (key) {
 					if (err) {
 						cb(err);
 					} else {
-						cb(null, decorate(current, result.score, result.best, user));
+						cb(null, decorate(current, result.score, result.best, user, userData));
 					}
 				});
 			}
