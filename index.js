@@ -211,11 +211,25 @@ module.exports = function (key) {
 		}
 	};
 	inst.watching = function (user) {
-		return Boolean(meta[user] ? meta[user].watching : false);
+		if (user) {
+			return Boolean(meta[user] ? meta[user].watching : false);
+		} else {
+			return Object.keys(meta).filter(function (userName) {
+				return Boolean(meta[userName].watching);
+			});
+		}
 	};
 	inst.unwatch = function (user) {
-		if (meta[user] && meta[user].watching) {
-			meta[user].watching.stop = true;
+		if (user) {
+			if (meta[user] && meta[user].watching) {
+				meta[user].watching.stop = true;
+			}
+		} else {
+			Object.keys(meta).forEach(function (userName) {
+				if (meta[userName] && meta[userName].watching) {
+					meta[userName].watching.stop = true;
+				}
+			});
 		}
 	};
 	inst.lastScore = function (user, mode, cb) {
