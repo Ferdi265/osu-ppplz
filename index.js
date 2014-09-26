@@ -85,6 +85,24 @@ module.exports = function (key) {
 				timeout = setTimeout(process, 0);
 			}
 		},
+		retry = function (amount, fn, thisArg) {
+			var args = Array.prototype.slice.call(arguments, 3),
+				counter = 0;
+			return function (cb) {
+				args.push(function (err, res) {
+					if (err) {
+						if (++counter >= amount) {
+							cb(err, res);
+						} else {
+							fn.apply(thisArg, args);
+						}
+					} else {
+						cb(err, res);
+					}
+				});
+				fn.apply(thisArg, args);
+			};
+		},
 		watch = function (userData) {
 			if (userData.watching.stop) {
 				userData.watching.cb('Stopped watching.');
@@ -92,8 +110,8 @@ module.exports = function (key) {
 			} else if (!userData.watching.start) {
 				osu.setMode(userData.watching.mode);
 				async.parallel({
-					recentPlays: osu.getUserRecent.bind(osu, userData.user),
-					user: osu.getUser.bind(osu, userData.user)
+					recentPlays: retry(3, osu.getUserRecent, osu, userData.user),
+					user: retry(3, osu.getUser, osu, userData.user)
 				}, function (err, result) {
 					if (err) {
 						inst.unwatch(userData.user);
@@ -110,7 +128,7 @@ module.exports = function (key) {
 				});
 			} else {
 				osu.setMode(userData.watching.mode);
-				osu.getUserRecent(userData.id, function (err, recentPlays) {
+				retry(3, osu.getUserRecent, osu, userData.id)(function (err, recentPlays) {
 					if (err) {
 						inst.unwatch(userData.user);
 						userData.watching.cb(err);
@@ -122,9 +140,9 @@ module.exports = function (key) {
 							userData.lastAction = Date.now();
 							osu.setMode(userData.watching.mode);
 							async.parallel({
-								score: getScore.bind(undefined, current.beatmap_id, userData.id, userData.watching.mode),
-								user: osu.getUser.bind(osu, userData.id),
-								best: osu.getUserBestRaw.bind(osu, {
+								score: retry(3, getScore, undefined, current.beatmap_id, userData.id, userData.watching.mode),
+								user: retry(3, osu.getUser, osu, userData.id),
+								best: retry(3, osu.getUserBestRaw, osu, {
 									m: userData.watching.mode,
 									u: userData.id,
 									type: 'id',
@@ -158,7 +176,7 @@ module.exports = function (key) {
 				mode = osuapi.Modes.osu;
 			}
 			osu.setMode(mode);
-			osu.getUserScore(beatmapId, userId, function (err, score) {
+			retry(3, osu.getUserScore, osu, beatmapId, userId)(function (err, score) {
 				if (err) {
 					cb(err);
 				} else {
